@@ -108,6 +108,7 @@ def gen_rationale(order, rec, market, hist_ratio):
     try:
         return chat("항공화물 예약 추천의 근거를 실무자에게 설명합니다. 한국어, 담백하게. "
                     "마크다운 형식으로 작성 (### 소제목, **강조**, - 목록 활용). "
+                    "가격/절감/시장범위 등 수치 비교는 마크다운 표(| 항목 | 값 |)로 정리하세요. "
                     "가격 경쟁력, 스케줄 적합성, offload 리스크, 컨펌 기한을 항목별로 짚어주세요.",
                     json.dumps(facts, ensure_ascii=False), max_tokens=8000)  # opus-5 reasoning 토큰 포함 예산 — 잘림 방지
     except Exception:
@@ -290,19 +291,28 @@ def run_agent(store, order_no, today=TODAY):
     winner = min(finals, key=final_score)
     pick, std = sims[winner]["pick"], sims[winner]["std"]
     rate = finals[winner]
-    rec = {
-        "order_no": order_no, "carrier": winner,
-        "airline_name": pick["airline_name"], "flight_number": pick["flight_number"],
-        "flight_type": pick["flight_type"], "dep_date": pick["dep_date"], "dep_time": pick["dep_time"],
-        "arr_date": pick["arr_date"], "arr_time": pick["arr_time"], "confirm_by": pick["confirm_by"],
-        "offload_safe": pick["offload_safe"], "next_flight_arr": pick["next_flight_arr"],
-        "meets_desired": pick["meets_desired"], "factory_eta_hours": pick["factory_eta_hours"],
-        "cw": cw, "rate_per_kg": rate, "total_krw": round(rate * cw),
-        "std_allin_per_kg": std, "std_total_krw": pick["std"]["total_krw"],
-        "saving_krw": round(pick["std"]["total_krw"] - rate * cw),
-        "saving_pct": round((1 - rate * cw / pick["std"]["total_krw"]) * 100, 1),
-        "market": market,
-    }
+
+    def booking_payload(c):
+        """항공사별 확정(부킹) 페이로드 — 추천/대안 공통 스키마."""
+        p, r = sims[c]["pick"], finals[c]
+        return {
+            "order_no": order_no, "carrier": c,
+            "airline_name": p["airline_name"], "flight_number": p["flight_number"],
+            "flight_type": p["flight_type"], "dep_date": p["dep_date"], "dep_time": p["dep_time"],
+            "arr_date": p["arr_date"], "arr_time": p["arr_time"], "confirm_by": p["confirm_by"],
+            "offload_safe": p["offload_safe"], "next_flight_arr": p["next_flight_arr"],
+            "meets_desired": p["meets_desired"], "factory_eta_hours": p["factory_eta_hours"],
+            "cw": cw, "rate_per_kg": r, "total_krw": round(r * cw),
+            "std_allin_per_kg": sims[c]["std"], "std_total_krw": p["std"]["total_krw"],
+            "saving_krw": round(p["std"]["total_krw"] - r * cw),
+            "saving_pct": round((1 - r * cw / p["std"]["total_krw"]) * 100, 1),
+        }
+
+    rec = booking_payload(winner)
+    rec["market"] = market
+    # 대안: 추천받지 못한 항공사들도 확정 가능하도록 페이로드 제공 (견적가 낮은 순)
+    rec["alternatives"] = sorted((booking_payload(c) for c in finals if c != winner),
+                                 key=lambda a: a["rate_per_kg"])
     yield {"type": "progress", "message": "추천 근거 정리 중 (AI)..."}
     contact = store.contacts[winner]
     closing_dec = {"decision": "confirm_request", "rate": rate,

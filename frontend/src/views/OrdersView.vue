@@ -86,9 +86,9 @@ async function refreshThreads(no) {
   }
 }
 
-async function confirmBooking() {
+async function confirmBooking(payload) {
   booking.value = true
-  await postJSON('/api/bookings', shownRec.value)
+  await postJSON('/api/bookings', payload)
   await loadOrders(true)
   await refreshThreads(selected.value.order_no)
   booking.value = false
@@ -255,9 +255,20 @@ const initials = (name) => name.trim()[0].toUpperCase()
         <span v-if="selected?.awb" class="badge awb">AWB {{ selected.awb }}</span>
       </div>
       <div class="rationale" v-html="md(shownRec.rationale)"></div>
-      <button class="primary" :disabled="booking || selected?.status === 'BOOKED'" @click="confirmBooking">
-        {{ selected?.status === 'BOOKED' ? '예약 확정됨 ✔' : '이 조건으로 예약 확정' }}
-      </button>
+      <div v-if="selected?.status === 'BOOKED'" class="confirm-row">
+        <button class="primary" disabled>예약 확정됨 ✔</button>
+      </div>
+      <div v-else class="confirm-row">
+        <button class="primary" :disabled="booking" @click="confirmBooking(shownRec)">
+          추천 — {{ shownRec.airline_name }}(으)로 확정
+        </button>
+        <!-- 대안: 추천받지 못한 항공사로도 확정 가능 -->
+        <button v-for="alt in shownRec.alternatives || []" :key="alt.carrier" class="alt"
+                :disabled="booking" @click="confirmBooking(alt)"
+                :title="`${alt.flight_number} ${alt.dep_date} 출발 · 표준가 대비 -${alt.saving_pct}%`">
+          {{ alt.airline_name }}(으)로 확정 <span class="alt-rate">{{ won(alt.rate_per_kg) }}원/kg</span>
+        </button>
+      </div>
 
       <!-- 네고 메일 내역 (항공사별 탭 + 메일 아코디언 + 스크롤) -->
       <div v-if="negoThreads.length" class="mails">
@@ -364,6 +375,22 @@ tr.winner { background: var(--green-soft); }
 .rationale :deep(.md-li) { margin: 3px 0 3px 8px; }
 .rationale :deep(.md-gap) { height: 6px; }
 .rationale :deep(code) { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+.rationale :deep(.md-table) { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+.rationale :deep(.md-table th) {
+  background: #f8fafc; border: 1px solid var(--line); padding: 6px 12px;
+  text-align: left; color: var(--ink); font-weight: 700; white-space: nowrap;
+}
+.rationale :deep(.md-table td) { border: 1px solid var(--line); padding: 6px 12px; white-space: normal; }
+
+/* 확정 버튼: 추천(파랑) + 대안(주황 아웃라인) */
+.confirm-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button.alt {
+  background: #fff; color: var(--amber); border: 2px solid var(--amber); border-radius: 8px;
+  padding: 8px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer;
+}
+button.alt:hover:not(:disabled) { background: var(--amber-soft); }
+button.alt:disabled { color: #94a3b8; border-color: #cbd5e1; cursor: default; }
+.alt-rate { font-weight: 400; font-size: 12px; opacity: 0.85; }
 
 /* 네고 메일 내역 */
 .mails { margin-top: 16px; border-top: 1px dashed var(--green); padding-top: 14px; }

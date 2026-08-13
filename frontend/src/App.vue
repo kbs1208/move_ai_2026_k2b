@@ -19,7 +19,7 @@ const menus = [
 <template>
   <aside class="sidebar">
     <div class="logo">
-      <img src="/logo.svg" alt="AirNego" class="logo-img" />
+      <img src="/logo.png" alt="airnego — AIR CARGO NEGOTIATION AGENT" class="logo-img" />
     </div>
     <nav>
       <a v-for="m in menus" :key="m.id" :class="{ active: tab === m.id }" @click="tab = m.id">
