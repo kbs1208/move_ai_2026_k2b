@@ -1,7 +1,6 @@
 <script setup>
 import { ref } from 'vue'
 import OrdersView from './views/OrdersView.vue'
-import MailView from './views/MailView.vue'
 import DashboardView from './views/DashboardView.vue'
 import RatesView from './views/RatesView.vue'
 import SchedulesView from './views/SchedulesView.vue'
@@ -10,7 +9,6 @@ import ContactsView from './views/ContactsView.vue'
 const tab = ref('orders')
 const menus = [
   { id: 'orders', label: '주문 · AI 에이전트', icon: '✈' },
-  { id: 'mail', label: '메일함', icon: '✉' },
   { id: 'rates', label: '가격 테이블', icon: '₩' },
   { id: 'sched', label: '스케줄 테이블', icon: '⏱' },
   { id: 'contacts', label: '항공사 담당자', icon: '☎' },
@@ -21,11 +19,7 @@ const menus = [
 <template>
   <aside class="sidebar">
     <div class="logo">
-      <div class="logo-mark">A</div>
-      <div>
-        <div class="logo-title">Air Nego</div>
-        <div class="logo-sub">AirCargo Nego Agent · ICN</div>
-      </div>
+      <img src="/logo.svg" alt="AirNego" class="logo-img" />
     </div>
     <nav>
       <a v-for="m in menus" :key="m.id" :class="{ active: tab === m.id }" @click="tab = m.id">
@@ -36,7 +30,6 @@ const menus = [
   </aside>
   <main class="content">
     <OrdersView v-if="tab === 'orders'" />
-    <MailView v-else-if="tab === 'mail'" />
     <RatesView v-else-if="tab === 'rates'" />
     <SchedulesView v-else-if="tab === 'sched'" />
     <ContactsView v-else-if="tab === 'contacts'" />
@@ -49,13 +42,11 @@ const menus = [
   width: 220px; flex: none; background: #0f172a; color: #cbd5e1;
   display: flex; flex-direction: column; padding: 18px 12px;
 }
-.logo { display: flex; gap: 10px; align-items: center; padding: 4px 8px 18px; border-bottom: 1px solid #1e293b; }
-.logo-mark {
-  width: 34px; height: 34px; border-radius: 8px; background: var(--blue);
-  color: #fff; font-weight: 800; font-size: 18px; display: flex; align-items: center; justify-content: center;
+.logo { padding: 2px 4px 16px; border-bottom: 1px solid #1e293b; }
+.logo-img {
+  display: block; width: 100%; max-width: 176px; margin: 0 auto;
+  background: #fff; border-radius: 10px; padding: 8px 10px; box-sizing: border-box;
 }
-.logo-title { font-weight: 700; color: #f1f5f9; font-size: 14px; }
-.logo-sub { font-size: 11px; color: #64748b; }
 nav { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 nav a {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px;

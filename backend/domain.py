@@ -158,10 +158,11 @@ if __name__ == "__main__":
 
     o = store.orders["GLV-KD-20260810-001"]
     assert o["chargeable_weight_kg"] == 1460.64, o["chargeable_weight_kg"]
-    assert o["max_height_cm"] == 160
+    assert o["max_height_cm"] == 170  # 여객기 한계(160) 초과 -> 화물기 전용
 
     cands = find_candidates(store, o)
     assert cands, "후보가 있어야 함"
+    assert all(c["flight_type"] == "CARGO" for c in cands), "높이 170cm는 화물기만 가능"
     for c in cands:
         assert d(c["arr_date"]) <= d(o["deadline_date"])
         assert (d(c["dep_date"]) - TODAY).days >= 3

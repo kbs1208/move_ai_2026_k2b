@@ -60,16 +60,18 @@ def write_reply_email(contact, ctx, decision):
         "counter": f"역제안: 제안가는 어렵고 kg당 {decision['rate']:,} KRW까지 가능",
         "confirm_request": (
             f"최종 합의 확인: kg당 {decision['rate']:,} KRW로 스페이스 홀드 완료. "
-            "메일의 마지막 문장은 반드시 다음 문구 그대로 끝낼 것: "
+            "감사 인사 직전 마지막 문장은 반드시 다음 문구 그대로 쓸 것: "
             "'예약확정을 위해 당사시스템에 예약한 AWB 번호를 회신하여 주시기 바랍니다.'"
         ),
     }[decision["decision"]]
     lf_note = "스페이스 여유 있음" if decision["lf"] < 0.65 else ("스페이스 보통" if decision["lf"] < 0.8 else "스페이스 타이트, 강하게 어필")
+    signature = f"감사합니다.\n\n{contact['airline']} 화물예약팀\n담당자 {contact['name']}"
     system = (f"당신은 {contact['airline']} 화물 예약 담당자 {contact['name']}입니다. "
               f"성향: {CARRIER_PROFILES[ctx['carrier']]['style']} "
               "현대글로비스의 항공화물 예약 요청 메일에 회신합니다. 반드시 한국어로 작성 (담당자가 외국인이어도 한국어). "
-              "비즈니스 메일 본문만 출력 (제목 제외, 서명 포함). 6문장 이내로 간결하게. "
-              "kg당 단가(KRW)를 본문에 반드시 명시.")
+              "비즈니스 메일 본문만 출력 (제목 제외). 6문장 이내로 간결하게. "
+              "kg당 단가(KRW)를 본문에 반드시 명시. "
+              f"메일의 끝은 반드시 다음 형식 그대로 마무리할 것:\n{signature}")
     user = (f"[회신할 내용] {action}\n[내부 참고-비공개] {lf_note}\n"
             f"[요청 정보] 편명 {ctx['flight_number']} / {ctx['origin']}->{ctx['dest']} "
             f"{ctx['dep_date']} 출발 / 물량 {ctx['cw']:,.0f}kg (chargeable)\n"
@@ -81,7 +83,7 @@ def write_reply_email(contact, ctx, decision):
         if decision["decision"] == "confirm_request":
             return (f"안녕하세요, {contact['airline']} {contact['name']}입니다.\n"
                     f"{ctx['flight_number']} ({ctx['dep_date']}) 건 kg당 {decision['rate']:,} KRW로 확정 진행합니다.\n"
-                    "예약확정을 위해 당사시스템에 예약한 AWB 번호를 회신하여 주시기 바랍니다.")
+                    f"예약확정을 위해 당사시스템에 예약한 AWB 번호를 회신하여 주시기 바랍니다.\n{signature}")
         return (f"안녕하세요, {contact['airline']} {contact['name']}입니다.\n"
                 f"{ctx['flight_number']} ({ctx['dep_date']}) 건, kg당 {decision['rate']:,} KRW (all-in) 안내드립니다.\n"
-                f"감사합니다.")
+                f"{signature}")

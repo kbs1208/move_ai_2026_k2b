@@ -1,5 +1,5 @@
 order_no,origin_airport,dest_airport,item_name,piece,weight_kg,width,lenght,height,size_cbm,chargeable_weight_kg,is_dg,cargo_ready_date,desired_arr_date,deadline_date,order_status
-GLV-KD-20260810-001,ICN,ATL,변속기 서브 조립체 (Transmission Sub-Assy),3,750.96,120,100,160,5.76,960.0,N,2026-08-10,2026-08-13,2026-08-20,PENDING
+GLV-KD-20260810-001,ICN,ATL,변속기 서브 조립체 (Transmission Sub-Assy),3,750.96,120,100,170,5.76,960.0,N,2026-08-10,2026-08-13,2026-08-20,PENDING
 GLV-KD-20260810-001,ICN,ATL,변속기 서브 조립체 (Transmission Sub-Assy),2,500.64,100,100,100,2.0,500.64,N,2026-08-10,2026-08-13,2026-08-20,PENDING
 GLV-KD-20260810-002,ICN,ATL,에어백 인플레이터 모듈 (Airbag Module),1,110.8,120,100,117,1.4,234.0,Y,2026-08-10,2026-08-14,2026-08-21,PENDING
 GLV-KD-20260810-002,ICN,ATL,에어백 인플레이터 모듈 (Airbag Module),1,110.8,100,100,100,1.0,166.67,Y,2026-08-10,2026-08-14,2026-08-21,PENDING

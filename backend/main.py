@@ -1,6 +1,8 @@
-# FastAPI 앱: REST + SSE (에이전트 실행 스트림)
+# FastAPI 앱: REST + SSE 이벤트 허브 (멀티유저 실시간 동기화)
 import json
+import queue
 import random
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -14,6 +16,42 @@ from store import AWB_PREFIX, store
 
 app = FastAPI(title="Air Cargo Nego Agent")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ---------- SSE 허브: 실행은 서버 백그라운드, 모든 접속자에게 브로드캐스트 ----------
+RUNS = {}   # order_no -> {"running": bool, "events": [...]}  (서버 메모리, 재시작 시 소멸)
+SUBS = []   # 구독자 큐 목록
+_sub_lock = threading.Lock()
+
+
+def broadcast(ev):
+    with _sub_lock:
+        subs = list(SUBS)
+    for q in subs:
+        try:
+            q.put_nowait(ev)
+        except queue.Full:
+            pass
+
+
+def _drive(order_no):
+    """에이전트 실행을 서버 스레드에서 구동 — 이벤트 축적(늦은 접속자 리플레이용) + 브로드캐스트."""
+    slot = RUNS[order_no]
+    try:
+        for ev in run_agent(store, order_no):
+            ev["order_no"] = order_no
+            # 실행 결과 영속화: 메일 스레드 / 추천
+            if ev["type"] == "email":
+                store.save_thread(ev["thread"])
+            elif ev["type"] == "recommendation":
+                store.save_recommendation(order_no, ev["recommendation"])
+            slot["events"].append(ev)
+            broadcast(ev)
+    except Exception as e:  # 데모 중단 방지: 에러도 이벤트로
+        ev = {"type": "error", "order_no": order_no, "message": str(e)}
+        slot["events"].append(ev)
+        broadcast(ev)
+    finally:
+        slot["running"] = False
 
 
 @app.get("/api/meta")
@@ -52,22 +90,39 @@ def candidates(order_no: str):
     return find_candidates(store, store.orders[order_no])
 
 
-@app.get("/api/agent/run")
-def agent_run(order_no: str):
+@app.post("/api/agent/start")
+def agent_start(order_no: str):
+    """에이전트 실행 시작 (백그라운드). 진행 상황은 /api/events로 전 접속자에게 스트림."""
     if order_no not in store.orders:
         raise HTTPException(404)
+    if RUNS.get(order_no, {}).get("running"):
+        return {"ok": True, "already_running": True}
+    RUNS[order_no] = {"running": True, "events": []}
+    threading.Thread(target=_drive, args=(order_no,), daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/events")
+def events():
+    """전역 SSE: 접속 시 진행 중/완료 실행 스냅샷 리플레이 후 실시간 이벤트 구독."""
+    q = queue.Queue(maxsize=2000)
 
     def stream():
+        with _sub_lock:
+            SUBS.append(q)
         try:
-            for ev in run_agent(store, order_no):
-                # 실행 결과 영속화: 메일 스레드 / 추천
-                if ev["type"] == "email":
-                    store.save_thread(ev["thread"])
-                elif ev["type"] == "recommendation":
-                    store.save_recommendation(order_no, ev["recommendation"])
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # 데모 중단 방지: 에러도 이벤트로
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            snapshot = {"type": "snapshot", "runs": RUNS}
+            yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+            while True:
+                try:
+                    ev = q.get(timeout=15)
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except queue.Empty:
+                    yield ": ping\n\n"  # CloudFront/프록시 idle timeout 방지
+        finally:
+            with _sub_lock:
+                if q in SUBS:
+                    SUBS.remove(q)
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -95,9 +150,10 @@ def book(rec: dict):
                      f"협의드린 조건(kg당 {rec.get('rate_per_kg', 0):,}원, {rec.get('flight_number', '')} "
                      f"{rec.get('dep_date', '')} 출발)으로 예약을 확정합니다.\n"
                      f"당사 시스템에 예약한 AWB 번호는 {awb} 입니다. 부킹 확정 처리 부탁드립니다.\n"
-                     f"감사합니다."),
+                     f"감사합니다.\n\n현대글로비스 항공수입팀\n매니저 김글로"),
         })
         store.save_thread(thread)
+    broadcast({"type": "booked", "order_no": order_no, "awb": awb})  # 전 접속자 동기화
     return {"ok": True, "order_no": order_no, "awb": awb}
 
 
@@ -106,6 +162,8 @@ def cancel(order_no: str):
     if order_no not in store.orders:
         raise HTTPException(404)
     store.cancel_booking(order_no)  # DB 영속화 + 주문 상태 PENDING 복귀
+    RUNS.pop(order_no, None)        # 실행 이력(타임라인/견적)도 전 접속자 화면에서 제거
+    broadcast({"type": "cancelled", "order_no": order_no})
     return {"ok": True, "order_no": order_no}
 
 
@@ -145,6 +203,7 @@ def dashboard():
         by_dest[r["dest"]]["count"] += 1
         by_dest[r["dest"]]["saving"] += r["saving_krw"]
     return {
+        "total_final_krw": round(total_final),
         "total_saving_krw": round(total_saving),
         "avg_discount_pct": round((1 - total_final / total_std) * 100, 1) if total_std else 0,
         "deal_count": len(rows),

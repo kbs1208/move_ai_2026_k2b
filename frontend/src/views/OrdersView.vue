@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { deleteJSON, getJSON, postJSON, runAgent, won } from '../api.js'
-import { runs, initRun } from '../agentRuns.js'
+import { deleteJSON, getJSON, md, postJSON, won } from '../api.js'
+import { runs, dataVersion, startAgent } from '../agentRuns.js'
 
 const orders = ref([])
 const selected = ref(null)
@@ -16,25 +16,25 @@ async function loadOrders(keepSel = false) {
   if (keepSel && no) selected.value = orders.value.find((o) => o.order_no === no) || null
 }
 onMounted(loadOrders)
+// 다른 접속자의 실행/예약/취소까지 실시간 반영
+watch(dataVersion, () => loadOrders(true))
 
-// 선택 주문의 실행 슬롯 (전역 스토어 — 주문 전환에도 유지)
+// 선택 주문의 실행 슬롯 (전역 스토어 — 모든 접속자 공통 상태)
 const run = computed(() => runs[selected.value?.order_no] || null)
 // 화면에 보여줄 추천: 이번 실행 결과 우선, 없으면 DB에 저장된 추천
 const shownRec = computed(() => run.value?.rec || selected.value?.recommendation || null)
+
+// 타임라인 자동 스크롤
+watch(() => run.value?.events.length, () => {
+  nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
+})
 
 function select(o) {
   selected.value = o
   mailTab.value = null
   savedThreads.value = []
   // 라이브 실행 이력이 없는 주문의 저장된 추천이면 서버에서 메일 스레드 복원
-  if (!runs[o.order_no] && o.recommendation) {
-    getJSON('/api/emails').then((all) => {
-      const mine = all.filter((t) => t.order_no === o.order_no)
-      const byCarrier = {}
-      for (const t of mine.reverse()) byCarrier[t.carrier] = t // 항공사별 최신 스레드
-      savedThreads.value = Object.values(byCarrier)
-    })
-  }
+  if (!runs[o.order_no] && o.recommendation) refreshThreads(o.order_no)
 }
 
 // 네고 메일 내역 (라이브 스레드 우선, 없으면 저장본)
@@ -66,42 +66,11 @@ function collapseAll() {
 }
 const preview = (body) => body.split('\n').find((l) => l.trim()) || ''
 
-function scrollLog() {
-  nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
-}
-
-function start() {
+async function start() {
   const no = selected.value?.order_no
   if (!no || runs[no]?.running) return
-  const slot = initRun(no)
   savedThreads.value = []
-  runAgent(no, (ev) => {
-    if (ev.message) slot.events.push(ev)
-    if (selected.value?.order_no === no) scrollLog()
-    if (ev.type === 'candidates') {
-      slot.candCount = ev.candidates.length
-      slot.picks = ev.picks
-      slot.rfqTotal = ev.picks.length
-      for (const p of ev.picks) slot.carrierState[p.carrier] = { std: p.std.allin_per_kg }
-    } else if (ev.type === 'email') {
-      slot.threads[ev.thread.carrier] = ev.thread
-      if (ev.stage === 'rfq' && ev.direction === 'in') slot.rfqReplied++
-    } else if (ev.type === 'quotes') {
-      slot.market = ev.market
-      for (const [c, q] of Object.entries(ev.market.quotes))
-        slot.carrierState[c] = { ...slot.carrierState[c], quote: q, last: q }
-    } else if (ev.type === 'nego') {
-      slot.carrierState[ev.carrier] = {
-        ...slot.carrierState[ev.carrier], last: ev.rate, decision: ev.decision,
-      }
-    } else if (ev.type === 'recommendation') {
-      slot.rec = ev.recommendation
-      loadOrders(true) // AWAITING 반영
-    } else if (ev.type === 'done' || ev.type === 'error') {
-      slot.running = false
-      loadOrders(true)
-    }
-  })
+  await startAgent(no) // 서버 백그라운드 실행 — 진행 상황은 전역 SSE로 모든 접속자에게 수신
 }
 
 async function refreshThreads(no) {
@@ -180,12 +149,22 @@ const initials = (name) => name.trim()[0].toUpperCase()
     <section v-if="selected" class="panel pad detail">
       <div class="detail-head">
         <h3>주문 상세 <span class="mono sub">{{ selected.order_no }}</span></h3>
-        <button v-if="selected.status === 'BOOKED'" class="danger" :disabled="booking" @click="cancelBooking">
-          {{ booking ? '취소 중...' : '예약 취소' }}
-        </button>
-        <button v-else class="primary" :disabled="run?.running" @click="start">
-          {{ run?.running ? 'AI 에이전트 실행 중...' : 'AI 에이전트 실행' }}
-        </button>
+        <div class="head-actions">
+          <!-- BOOKED: '예약 확정' 녹색 고정(클릭 불가) + 취소 버튼 -->
+          <template v-if="selected.status === 'BOOKED'">
+            <button class="booked" disabled>예약 확정 ✔</button>
+            <button class="danger" :disabled="booking" @click="cancelBooking">
+              {{ booking ? '취소 중...' : '예약 취소' }}
+            </button>
+          </template>
+          <!-- PENDING: 실행 가능 / 실행 중 · AWAITING: 비활성 -->
+          <button v-else class="primary"
+                  :disabled="run?.running || selected.status === 'AWAITING'" @click="start">
+            {{ run?.running ? 'AI 에이전트 실행 중...'
+               : selected.status === 'AWAITING' ? 'AI 에이전트 실행 (추천 확정 대기)'
+               : 'AI 에이전트 실행' }}
+          </button>
+        </div>
       </div>
       <div class="info-grid">
         <div class="info"><label>구간</label><b>{{ selected.origin }} → {{ selected.dest }}</b></div>
@@ -292,7 +271,7 @@ const initials = (name) => name.trim()[0].toUpperCase()
         <span class="badge amber">컨펌 기한 {{ shownRec.confirm_by }}</span>
         <span v-if="selected?.awb" class="badge awb">AWB {{ selected.awb }}</span>
       </div>
-      <p class="rationale">{{ shownRec.rationale }}</p>
+      <div class="rationale" v-html="md(shownRec.rationale)"></div>
       <button class="primary" :disabled="booking || selected?.status === 'BOOKED'" @click="confirmBooking">
         {{ selected?.status === 'BOOKED' ? '예약 확정됨 ✔' : '이 조건으로 예약 확정' }}
       </button>
@@ -349,6 +328,11 @@ tbody tr.sel { background: var(--blue-soft); }
 .detail { margin-top: 14px; }
 .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .detail-head h3 { margin: 0; }
+.head-actions { display: flex; gap: 8px; }
+button.booked {
+  background: var(--green); color: #fff; border: 0; border-radius: 8px;
+  padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: default; opacity: 1;
+}
 .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 16px; margin-bottom: 14px; }
 .info { background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
 .info label { display: block; font-size: 11px; color: var(--sub); margin-bottom: 3px; }
@@ -392,7 +376,12 @@ tr.winner { background: var(--green-soft); }
 .rec-price .rate { font-size: 18px; font-weight: 800; }
 .rec-price .total { font-size: 12.5px; color: var(--sub); }
 .rec-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
-.rationale { font-size: 13px; line-height: 1.7; white-space: pre-wrap; background: #fff; border-radius: 8px; padding: 12px; margin: 0 0 12px; }
+.rationale { font-size: 13px; line-height: 1.7; background: #fff; border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
+.rationale :deep(p) { margin: 2px 0; }
+.rationale :deep(h4) { margin: 10px 0 4px; font-size: 13.5px; color: var(--green); }
+.rationale :deep(.md-li) { margin: 3px 0 3px 8px; }
+.rationale :deep(.md-gap) { height: 6px; }
+.rationale :deep(code) { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 
 /* 네고 메일 내역 */
 .mails { margin-top: 16px; border-top: 1px dashed var(--green); padding-top: 14px; }

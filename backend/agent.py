@@ -11,6 +11,7 @@ from domain import TODAY, find_candidates
 from llm import chat, chat_json
 
 GLOVIS = {"name": "김글로 매니저", "email": "kim.glovis@glovis.com", "team": "현대글로비스 항공수입팀"}
+GLOVIS_SIGNATURE = "감사합니다.\n\n현대글로비스 항공수입팀\n매니저 김글로"
 MAX_RFQ_CARRIERS = 5
 NEGO_TOP_N = 2
 OFFLOAD_RISK_PENALTY = 600  # kg당 페널티: offload 시 차기편이 데드라인 못 지키는 후보 (컨셉 핵심 규칙)
@@ -40,9 +41,10 @@ def gen_rfq_emails(order, picks):
     """글로비스 페르소나로 항공사별 RFQ 메일 일괄 생성. {carrier: body}"""
     system = (f"당신은 {GLOVIS['team']} {GLOVIS['name']}입니다. "
               "항공사 화물 예약 담당자에게 보낼 견적요청(RFQ) 메일 본문을 작성합니다. "
-              "정중한 비즈니스 한국어, 5문장 이내, 서명 포함. "
+              "정중한 비즈니스 한국어, 5문장 이내. "
               "구간/편명/출발일/chargeable weight를 명시하고 kg당 all-in 단가 견적을 요청하세요. "
-              "가격 여지를 탐색하는 뉘앙스를 담되 구체적 금액은 제시하지 마세요.")
+              "가격 여지를 탐색하는 뉘앙스를 담되 구체적 금액은 제시하지 마세요. "
+              f"각 메일의 끝은 반드시 다음 형식 그대로 마무리할 것:\n{GLOVIS_SIGNATURE}")
     items = [{"carrier": p["carrier"], "airline": p["airline_name"], "flight": p["flight_number"],
               "dep_date": p["dep_date"], "route": f"{order['origin']}->{order['dest']}",
               "cw_kg": order["chargeable_weight_kg"], "pieces": order["pieces"],
@@ -57,7 +59,7 @@ def gen_rfq_emails(order, picks):
             f"안녕하세요, {GLOVIS['team']} {GLOVIS['name']}입니다.\n"
             f"{order['origin']}->{order['dest']} {p['flight_number']} ({p['dep_date']} 출발) 편에 "
             f"chargeable {order['chargeable_weight_kg']:,.0f}kg 예약을 검토 중입니다.\n"
-            f"kg당 all-in 단가 견적 부탁드립니다.\n감사합니다.") for p in picks}
+            f"kg당 all-in 단가 견적 부탁드립니다.\n{GLOVIS_SIGNATURE}") for p in picks}
 
 
 def parse_quote_emails(replies):
@@ -74,8 +76,9 @@ def gen_counter_emails(order, offers):
     """카운터오퍼 메일 일괄 생성. offers: [{carrier, flight, dep_date, their_rate, our_rate, reason}]"""
     system = (f"당신은 {GLOVIS['team']} {GLOVIS['name']}입니다. "
               "항공사의 견적에 대한 카운터오퍼 메일 본문을 작성합니다. "
-              "정중하지만 단호한 비즈니스 한국어, 4문장 이내, 서명 포함. "
-              "제시된 our_rate(kg당 KRW)를 명시하고 reason을 근거로 활용하세요.")
+              "정중하지만 단호한 비즈니스 한국어, 4문장 이내. "
+              "제시된 our_rate(kg당 KRW)를 명시하고 reason을 근거로 활용하세요. "
+              f"각 메일의 끝은 반드시 다음 형식 그대로 마무리할 것:\n{GLOVIS_SIGNATURE}")
     user = ('형식: {"emails": [{"carrier": "코드", "body": "본문"}]}\n'
             + json.dumps(offers, ensure_ascii=False))
     try:
@@ -84,7 +87,7 @@ def gen_counter_emails(order, offers):
     except Exception:
         return {o["carrier"]: (
             f"안녕하세요, {GLOVIS['name']}입니다.\n제시해주신 kg당 {o['their_rate']:,}원은 수용이 어렵습니다.\n"
-            f"kg당 {o['our_rate']:,}원에 진행 가능하시면 바로 확정하겠습니다.\n감사합니다.") for o in offers}
+            f"kg당 {o['our_rate']:,}원에 진행 가능하시면 바로 확정하겠습니다.\n{GLOVIS_SIGNATURE}") for o in offers}
 
 
 def gen_rationale(order, rec, market, hist_ratio):
@@ -103,8 +106,9 @@ def gen_rationale(order, rec, market, hist_ratio):
         "예약컨펌기한": rec["confirm_by"],
     }
     try:
-        return chat("항공화물 예약 추천의 근거를 실무자에게 설명합니다. 한국어 4~6문장, 담백하게. "
-                    "가격 경쟁력, 스케줄 적합성, offload 리스크, 컨펌 기한을 짚어주세요.",
+        return chat("항공화물 예약 추천의 근거를 실무자에게 설명합니다. 한국어, 담백하게. "
+                    "마크다운 형식으로 작성 (### 소제목, **강조**, - 목록 활용). "
+                    "가격 경쟁력, 스케줄 적합성, offload 리스크, 컨펌 기한을 항목별로 짚어주세요.",
                     json.dumps(facts, ensure_ascii=False), max_tokens=8000)  # opus-5 reasoning 토큰 포함 예산 — 잘림 방지
     except Exception:
         return (f"{rec['flight_number']} ({rec['dep_date']}) 편을 kg당 {rec['rate_per_kg']:,}원에 예약 권고. "

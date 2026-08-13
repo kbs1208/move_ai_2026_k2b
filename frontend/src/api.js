@@ -9,16 +9,21 @@ export const postJSON = (url, body) =>
 
 export const deleteJSON = (url) => fetch(url, { method: 'DELETE' }).then((r) => r.json())
 
-// 에이전트 SSE 스트림. onEvent(ev) 콜백, done/error에서 자동 종료.
-export function runAgent(orderNo, onEvent) {
-  const es = new EventSource(`/api/agent/run?order_no=${encodeURIComponent(orderNo)}`)
-  es.onmessage = (e) => {
-    const ev = JSON.parse(e.data)
-    onEvent(ev)
-    if (ev.type === 'done' || ev.type === 'error') es.close()
-  }
-  es.onerror = () => es.close()
-  return es
-}
-
 export const won = (n) => (n == null ? '-' : Math.round(n).toLocaleString('ko-KR'))
+
+// 초경량 마크다운 렌더러 (근거 텍스트용: 소제목/굵게/목록/문단)
+export function md(src) {
+  if (!src) return ''
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const inline = (s) => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
+  return src.split('\n').map((line) => {
+    const h = line.match(/^\s*#{1,4}\s+(.*)$/)
+    if (h) return `<h4>${inline(h[1])}</h4>`
+    const li = line.match(/^\s*[-•]\s+(.*)$/)
+    if (li) return `<p class="md-li">• ${inline(li[1])}</p>`
+    const ol = line.match(/^\s*(\d+)\.\s+(.*)$/)
+    if (ol) return `<p class="md-li">${ol[1]}. ${inline(ol[2])}</p>`
+    if (!line.trim()) return '<div class="md-gap"></div>'
+    return `<p>${inline(line)}</p>`
+  }).join('')
+}

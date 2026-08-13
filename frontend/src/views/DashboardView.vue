@@ -1,9 +1,13 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { getJSON, won } from '../api.js'
+import { dataVersion } from '../agentRuns.js'
 
 const data = ref(null)
-onMounted(async () => { data.value = await getJSON('/api/dashboard') })
+const load = async () => { data.value = await getJSON('/api/dashboard') }
+onMounted(load)
+// 다른 사용자의 예약 확정/취소도 SSE(dataVersion)로 실시간 반영
+watch(dataVersion, load)
 
 const carrierBars = computed(() => {
   if (!data.value) return []
@@ -24,6 +28,10 @@ const destBars = computed(() => {
     <h2>운영 대시보드 <span class="sub">표준가 대비 AI 네고 절감 실적 (최근 1개월 + 오늘)</span></h2>
 
     <div class="cards">
+      <div class="panel card">
+        <div class="label">총 금액 (합의가 기준)</div>
+        <div class="value">{{ won(data.total_final_krw) }}원</div>
+      </div>
       <div class="panel card">
         <div class="label">누적 절감액</div>
         <div class="value green">{{ won(data.total_saving_krw) }}원</div>
@@ -89,10 +97,10 @@ const destBars = computed(() => {
 <style scoped>
 .wrap { max-width: 1280px; margin: 0 auto; }
 .sub { color: var(--sub); font-weight: 400; font-size: 12px; }
-.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
 .card { padding: 18px 20px; }
 .label { font-size: 12px; color: var(--sub); margin-bottom: 8px; }
-.value { font-size: 26px; font-weight: 800; }
+.value { font-size: 24px; font-weight: 800; }
 .value.green, .green { color: var(--green); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .pad { padding: 16px; margin-bottom: 16px; }
