@@ -24,8 +24,6 @@
 
 ---
 
-- 실행 결과(네고 메일, 추천, 예약)는 SQLite에 저장되어 **서버 재시작에도 유지**
-
 ## AI 기능 매핑
 
 - 메일 발송 Form 생성 → `agent.gen_rfq_emails`, `gen_counter_emails`
