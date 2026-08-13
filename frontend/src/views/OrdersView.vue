@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { deleteJSON, getJSON, md, postJSON, won } from '../api.js'
+import { getJSON, md, postJSON, won } from '../api.js'
 import { runs, dataVersion, startAgent } from '../agentRuns.js'
 
 const orders = ref([])
@@ -94,15 +94,6 @@ async function confirmBooking() {
   booking.value = false
 }
 
-async function cancelBooking() {
-  booking.value = true
-  await deleteJSON(`/api/bookings/${selected.value.order_no}`)
-  delete runs[selected.value.order_no] // 추천 + 타임라인 + 견적/네고 현황 모두 제거
-  savedThreads.value = []
-  await loadOrders(true)
-  booking.value = false
-}
-
 const statusColor = { PENDING: 'blue', AWAITING: 'amber', BOOKED: 'green' }
 const icons = {
   start: '▶', candidates: '🔍', history: '📊', progress: '…', email: '✉',
@@ -149,22 +140,14 @@ const initials = (name) => name.trim()[0].toUpperCase()
     <section v-if="selected" class="panel pad detail">
       <div class="detail-head">
         <h3>주문 상세 <span class="mono sub">{{ selected.order_no }}</span></h3>
-        <div class="head-actions">
-          <!-- BOOKED: '예약 확정' 녹색 고정(클릭 불가) + 취소 버튼 -->
-          <template v-if="selected.status === 'BOOKED'">
-            <button class="booked" disabled>예약 확정 ✔</button>
-            <button class="danger" :disabled="booking" @click="cancelBooking">
-              {{ booking ? '취소 중...' : '예약 취소' }}
-            </button>
-          </template>
-          <!-- PENDING: 실행 가능 / 실행 중 · AWAITING: 비활성 -->
-          <button v-else class="primary"
-                  :disabled="run?.running || selected.status === 'AWAITING'" @click="start">
-            {{ run?.running ? 'AI 에이전트 실행 중...'
-               : selected.status === 'AWAITING' ? 'AI 에이전트 실행 (추천 확정 대기)'
-               : 'AI 에이전트 실행' }}
-          </button>
-        </div>
+        <!-- BOOKED = 종착 상태: 재실행/취소 불가 -->
+        <button v-if="selected.status === 'BOOKED'" class="booked" disabled>예약 확정 ✔</button>
+        <button v-else class="primary"
+                :disabled="run?.running || selected.status === 'AWAITING'" @click="start">
+          {{ run?.running ? 'AI 에이전트 실행 중...'
+             : selected.status === 'AWAITING' ? 'AI 에이전트 실행 (추천 확정 대기)'
+             : 'AI 에이전트 실행' }}
+        </button>
       </div>
       <div class="info-grid">
         <div class="info"><label>구간</label><b>{{ selected.origin }} → {{ selected.dest }}</b></div>
@@ -328,7 +311,6 @@ tbody tr.sel { background: var(--blue-soft); }
 .detail { margin-top: 14px; }
 .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .detail-head h3 { margin: 0; }
-.head-actions { display: flex; gap: 8px; }
 button.booked {
   background: var(--green); color: #fff; border: 0; border-radius: 8px;
   padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: default; opacity: 1;
