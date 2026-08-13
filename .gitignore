@@ -1,0 +1,25 @@
+# python
+__pycache__/
+*.pyc
+seed_history.py
+
+# runtime artifacts
+backend/nego.db
+backend/history_emails.json
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# os / editor / git
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# deploy
+deploy.sh
+
+# README.md
+README.md
+
