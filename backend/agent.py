@@ -2,6 +2,7 @@
 # LLM 호출은 배치로 묶어 데모 속도 확보 (call 수 ~7회)
 import json
 import statistics
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +15,7 @@ MAX_RFQ_CARRIERS = 5
 NEGO_TOP_N = 2
 OFFLOAD_RISK_PENALTY = 600  # kg당 페널티: offload 시 차기편이 데드라인 못 지키는 후보 (컨셉 핵심 규칙)
 DESIRED_MISS_PENALTY = 100  # 희망도착일 미충족 페널티
+MAIL_DELAY_SEC = 5          # 메일 발송 -> 회신 수신 사이 강제 딜레이 (왕복 현실감)
 
 
 KST = timezone(timedelta(hours=9))
@@ -150,7 +152,8 @@ def run_agent(store, order_no, today=TODAY):
                                    "direction": "out", "body": rfq_bodies[p["carrier"]]})
         threads[p["carrier"]] = thread
         store.threads.append(thread)
-        yield {"type": "email", "thread": thread, "message": f"→ {contact['airline']} RFQ 발송"}
+        yield {"type": "email", "thread": thread, "stage": "rfq", "direction": "out",
+               "message": f"→ {contact['airline']} RFQ 발송"}
 
     yield {"type": "progress", "message": "항공사 회신 대기 중..."}
     sims, replies = {}, []
@@ -164,14 +167,18 @@ def run_agent(store, order_no, today=TODAY):
             {"carrier": p["carrier"], "flight_number": p["flight_number"],
              "origin": order["origin"], "dest": order["dest"],
              "dep_date": p["dep_date"], "cw": cw}, sims[p["carrier"]]["dec"]) for p in picks}
-        for p in picks:
-            body = futs[p["carrier"]].result()
-            replies.append((p["carrier"], body))
-            threads[p["carrier"]]["messages"].append({
-                "from": store.contacts[p["carrier"]]["email"], "from_name": store.contacts[p["carrier"]]["name"],
-                "to": GLOVIS["email"], "ts": _now(), "direction": "in", "body": body})
-            yield {"type": "email", "thread": threads[p["carrier"]],
-                   "message": f"← {store.contacts[p['carrier']]['airline']} 회신 수신"}
+        bodies_in = {c: f.result() for c, f in futs.items()}
+    time.sleep(MAIL_DELAY_SEC)  # 발송 -> 회신 수신 사이 강제 딜레이
+    for i, p in enumerate(picks):
+        if i:
+            time.sleep(1.2)  # 회신 도착 스태거 (카운트 상승이 보이도록)
+        body = bodies_in[p["carrier"]]
+        replies.append((p["carrier"], body))
+        threads[p["carrier"]]["messages"].append({
+            "from": store.contacts[p["carrier"]]["email"], "from_name": store.contacts[p["carrier"]]["name"],
+            "to": GLOVIS["email"], "ts": _now(), "direction": "in", "body": body})
+        yield {"type": "email", "thread": threads[p["carrier"]], "stage": "rfq", "direction": "in",
+               "message": f"← {store.contacts[p['carrier']]['airline']} 회신 수신"}
 
     # 4) 수신 메일 해석 -> 시장 range / 타깃
     yield {"type": "progress", "message": "회신 메일 해석 중 (AI)..."}
@@ -235,21 +242,28 @@ def run_agent(store, order_no, today=TODAY):
                 decs[o["carrier"]]) for o in offers}
             reply_bodies = {c: f.result() for c, f in futs.items()}
         done = []
+        # 카운터오퍼 발송 (전체) -> 5초 딜레이 -> 회신 수신
         for o in offers:
             c = o["carrier"]
             contact = store.contacts[c]
             threads[c]["messages"].append({"from": GLOVIS["email"], "from_name": GLOVIS["name"],
                                            "to": contact["email"], "ts": _now(),
                                            "direction": "out", "body": bodies[c]})
-            yield {"type": "email", "thread": threads[c],
+            yield {"type": "email", "thread": threads[c], "stage": "nego", "direction": "out",
                    "message": f"→ {contact['airline']} 카운터오퍼 kg당 {o['our_rate']:,}원"}
+        time.sleep(MAIL_DELAY_SEC)
+        for i, o in enumerate(offers):
+            if i:
+                time.sleep(1.2)
+            c = o["carrier"]
+            contact = store.contacts[c]
             dec = decs[c]
             threads[c]["messages"].append({"from": contact["email"], "from_name": contact["name"],
                                            "to": GLOVIS["email"], "ts": _now(),
                                            "direction": "in", "body": reply_bodies[c]})
             sims[c]["last"] = dec["rate"]
             finals[c] = dec["rate"]
-            yield {"type": "email", "thread": threads[c],
+            yield {"type": "email", "thread": threads[c], "stage": "nego", "direction": "in",
                    "message": f"← {contact['airline']} {'수락' if dec['decision'] == 'accept' else '역제안'} "
                               f"kg당 {dec['rate']:,}원"}
             yield {"type": "nego", "carrier": c, "round": rnd, "offer": o["our_rate"],

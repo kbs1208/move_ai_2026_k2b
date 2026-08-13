@@ -42,21 +42,22 @@ onMounted(async () => { data.value = await getJSON('/api/rates') })
     </div>
 
     <div class="panel pad">
-      <h3>할증료 (Surcharges, KRW/kg)</h3>
-      <table class="narrow">
+      <h3>할증료 (Surcharges, KRW/kg — 항공사별)</h3>
+      <table style="max-width: 860px">
         <thead>
-          <tr><th>도착 지역</th><th class="num">유류 할증</th><th class="num">보안 할증</th><th>적용기간</th></tr>
+          <tr><th>항공사</th><th>도착 지역</th><th class="num">유류 할증</th><th class="num">보안 할증</th><th>적용기간</th></tr>
         </thead>
         <tbody>
-          <tr v-for="s in data.surcharges" :key="s.ARRV_REGION">
-            <td><b>{{ s.ARRV_REGION }}</b></td>
+          <tr v-for="s in data.surcharges" :key="s.CARRIER_CD + s.ARRV_REGION">
+            <td><b>{{ s.CARRIER_NM }}</b> <span class="mono sub">{{ s.CARRIER_CD }}</span></td>
+            <td>{{ s.ARRV_REGION }}</td>
             <td class="num">{{ won(s.FUEL_SURCHARGE_KG) }}</td>
             <td class="num">{{ won(s.SEC_SURCHARGE_KG) }}</td>
             <td class="sub">{{ s.SUR_EFFECTIVE_START_DATE }} ~ {{ s.SUR_EFFECTIVE_END_DATE }}</td>
           </tr>
         </tbody>
       </table>
-      <div class="note sub">all-in 단가 = weight-break 운임 + 유류 할증 + 보안 할증 (MIN 하한 적용)</div>
+      <div class="note sub">all-in 단가 = weight-break 운임 + 해당 항공사 유류/보안 할증 (MIN 하한 적용)</div>
     </div>
   </div>
 </template>

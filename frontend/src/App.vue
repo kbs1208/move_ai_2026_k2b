@@ -19,10 +19,10 @@ const menus = [
 <template>
   <aside class="sidebar">
     <div class="logo">
-      <div class="logo-mark">G</div>
+      <div class="logo-mark">A</div>
       <div>
-        <div class="logo-title">GLOVIS AirCargo</div>
-        <div class="logo-sub">Nego Agent · ICN Hub</div>
+        <div class="logo-title">Air Nego</div>
+        <div class="logo-sub">AirCargo Nego Agent · ICN</div>
       </div>
     </div>
     <nav>

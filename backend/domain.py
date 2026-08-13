@@ -25,9 +25,11 @@ def rate_per_kg(tariff, cw):
     return tariff["N"]
 
 
-def surcharge_per_kg(surcharges, region, on):
+def surcharge_per_kg(surcharges, carrier, region, on):
+    """항공사별 유류+보안 할증 (kg당)."""
     for s in surcharges:
-        if s["ARRV_REGION"] == region and d(s["SUR_EFFECTIVE_START_DATE"]) <= on <= d(s["SUR_EFFECTIVE_END_DATE"]):
+        if (s["carrier"] == carrier and s["ARRV_REGION"] == region
+                and d(s["SUR_EFFECTIVE_START_DATE"]) <= on <= d(s["SUR_EFFECTIVE_END_DATE"])):
             return s["FUEL_SURCHARGE_KG"] + s["SEC_SURCHARGE_KG"]
     return 0.0
 
@@ -45,10 +47,10 @@ def find_tariff(rates, carrier, origin, dest, on):
 
 
 def standard_quote(tariff, surcharges, cw, on):
-    """표준가 all-in: max(MIN, 요율*CW) + 할증*CW. kg당 환산 단가도 반환."""
+    """표준가 all-in: max(MIN, 요율*CW) + 항공사별 할증*CW. kg당 환산 단가도 반환."""
     rate = rate_per_kg(tariff, cw)
     freight = max(tariff["MIN"], rate * cw)
-    sur = surcharge_per_kg(surcharges, tariff["ARRV_REGION"], on) * cw
+    sur = surcharge_per_kg(surcharges, tariff["carrier"], tariff["ARRV_REGION"], on) * cw
     total = freight + sur
     return {
         "rate_per_kg": rate,
@@ -163,11 +165,16 @@ if __name__ == "__main__":
     for c in cands:
         assert d(c["arr_date"]) <= d(o["deadline_date"])
         assert (d(c["dep_date"]) - TODAY).days >= 3
-    # KE 요율 검증: ICN->ATL Standard, CW>=1000 -> 4900/kg + 할증 3500/kg
+    # KE 요율 검증: ICN->ATL Standard, CW>=1000 -> 3900/kg + KE USA 할증 (1890+450)/kg
     t = find_tariff(store.rates, "KE", "ICN", "ATL", date(2026, 8, 13))
     q = standard_quote(t, store.surcharges, 1460.64, date(2026, 8, 13))
-    assert q["rate_per_kg"] == 4900
-    assert q["total_krw"] == round(1460.64 * (4900 + 3500))
+    assert q["rate_per_kg"] == 3900, q["rate_per_kg"]
+    assert q["total_krw"] == round(1460.64 * (3900 + 1890 + 450)), q["total_krw"]
+    # 항공사별 할증 상이 검증 (KE 2340 vs DL 2450)
+    assert surcharge_per_kg(store.surcharges, "KE", "USA", date(2026, 8, 13)) == 2340
+    assert surcharge_per_kg(store.surcharges, "DL", "USA", date(2026, 8, 13)) == 2450
+    # ZET->KJ alias 할증 매칭 (Air Zetta USA 1840+450)
+    assert surcharge_per_kg(store.surcharges, "KJ", "USA", date(2026, 8, 13)) == 2290
     # DG 주문(전 라인 Y)은 여객기 배제
     dg = store.orders["GLV-KD-20260810-002"]
     dg_c = find_candidates(store, dg)

@@ -75,7 +75,7 @@ def parse_orders(rows, status_map):
             "deadline_date": r["deadline_date"],
             "status": status_map.get(r["order_no"], r["order_status"]),
             "pieces": 0, "gross_weight_kg": 0.0, "chargeable_weight_kg": 0.0,
-            "max_height_cm": 0.0, "lines": [], "_items": [],
+            "size_cbm": 0.0, "max_height_cm": 0.0, "lines": [], "_items": [],
         })
         # 혼재 DG 주문: DG 라인이 하나라도 있으면 주문 전체가 화물기 제약 (동일 편 탑재)
         o["is_dg"] = o["is_dg"] or r["is_dg"] == "Y"
@@ -84,6 +84,7 @@ def parse_orders(rows, status_map):
         o["pieces"] += int(r["piece"])
         o["gross_weight_kg"] += float(r["weight_kg"])
         o["chargeable_weight_kg"] += float(r["chargeable_weight_kg"])
+        o["size_cbm"] += float(r["size_cbm"])
         o["max_height_cm"] = max(o["max_height_cm"], float(r["height"]))
         o["lines"].append({
             "item_name": r["item_name"], "is_dg": r["is_dg"] == "Y",
@@ -94,6 +95,7 @@ def parse_orders(rows, status_map):
     for o in orders.values():
         o["gross_weight_kg"] = round(o["gross_weight_kg"], 2)
         o["chargeable_weight_kg"] = round(o["chargeable_weight_kg"], 2)
+        o["size_cbm"] = round(o["size_cbm"], 2)
         items = o.pop("_items")
         o["item_name"] = items[0] if len(items) == 1 else f"{items[0]} 외 {len(items) - 1}건"
     return orders
@@ -111,6 +113,8 @@ def parse_surcharges(rows):
     for r in rows:
         r["FUEL_SURCHARGE_KG"] = float(r["FUEL_SURCHARGE_KG"])
         r["SEC_SURCHARGE_KG"] = float(r["SEC_SURCHARGE_KG"])
+        # 항공사별 할증 (스케줄 코드로 통일)
+        r["carrier"] = CARRIER_ALIAS.get(r["CARRIER_CD"], r["CARRIER_CD"])
     return rows
 
 
@@ -160,10 +164,13 @@ class Store:
             self.con.commit()
 
     def save_recommendation(self, order_no, rec):
+        """추천 저장 + 상태 AWAITING (추천 도출 즉시, 확정 대기)."""
         self.recommendations[order_no] = rec
+        self.orders[order_no]["status"] = "AWAITING"
         with self._lock:
             self.con.execute("INSERT OR REPLACE INTO recommendations VALUES(?,?)",
                              (order_no, json.dumps(rec, ensure_ascii=False)))
+            self.con.execute("INSERT OR REPLACE INTO order_status VALUES(?,?)", (order_no, "AWAITING"))
             self.con.commit()
 
     def add_booking(self, rec):
@@ -177,10 +184,13 @@ class Store:
             self.con.commit()
 
     def cancel_booking(self, order_no):
+        """예약 취소: 추천 정보까지 삭제하고 PENDING 복귀 (메일 이력은 유지)."""
         self.bookings = [b for b in self.bookings if b["order_no"] != order_no]
+        self.recommendations.pop(order_no, None)
         self.orders[order_no]["status"] = "PENDING"
         with self._lock:
             self.con.execute("DELETE FROM bookings WHERE order_no=?", (order_no,))
+            self.con.execute("DELETE FROM recommendations WHERE order_no=?", (order_no,))
             self.con.execute("INSERT OR REPLACE INTO order_status VALUES(?,?)", (order_no, "PENDING"))
             self.con.commit()
 
