@@ -24,6 +24,50 @@ const run = computed(() => runs[selected.value?.order_no] || null)
 // 화면에 보여줄 추천: 이번 실행 결과 우선, 없으면 DB에 저장된 추천
 const shownRec = computed(() => run.value?.rec || selected.value?.recommendation || null)
 
+// ---- 항공사별 상세 카드 (추천 + 대안) ----
+const selectedCarrier = ref(null)
+watch(shownRec, (r) => { selectedCarrier.value = r?.carrier || null }, { immediate: true })
+
+const shownCard = computed(() => {
+  const r = shownRec.value
+  if (!r) return null
+  if (!selectedCarrier.value || selectedCarrier.value === r.carrier) return { ...r, isWinner: true }
+  const alt = (r.alternatives || []).find((a) => a.carrier === selectedCarrier.value)
+  return alt ? { ...alt, isWinner: false } : { ...r, isWinner: true }
+})
+
+function pickCarrier(c) {
+  const r = shownRec.value
+  if (!r) return
+  if (c !== r.carrier && !(r.alternatives || []).some((a) => a.carrier === c)) return
+  selectedCarrier.value = c
+  if (negoThreads.value.find((t) => t.carrier === c)) mailTab.value = c
+}
+
+// 대안 항공사 근거 (수치 기반 마크다운 합성 — 추천 근거와 동일 구조로 렌더)
+function altRationale(card) {
+  const r = shownRec.value
+  const diff = card.rate_per_kg - r.rate_per_kg
+  return [
+    `### ${card.airline_name} 조건 요약 (대안)`,
+    '',
+    '| 항목 | 값 |',
+    '|---|---|',
+    `| 합의/견적 단가 | **${won(card.rate_per_kg)}원/kg** (all-in) |`,
+    `| 표준가 | ${won(card.std_allin_per_kg)}원/kg |`,
+    `| 절감 | ${won(card.saving_krw)}원 (**-${card.saving_pct}%**) |`,
+    `| 추천안(${r.airline_name}) 대비 | ${diff >= 0 ? '+' : ''}${won(diff)}원/kg |`,
+    `| 스케줄 | ${card.flight_number} · ${card.dep_date} ${card.dep_time || ''} 출발 → ${card.arr_date} ${card.arr_time || ''} 도착 |`,
+    `| Offload 안전성 | ${card.offload_safe ? `차기편 ${card.next_flight_arr} 도착 — 데드라인 커버 (SAFE)` : '차기편이 데드라인 초과 — offload 시 대체편 없음 (RISK)'} |`,
+    `| 희망도착일 | ${card.meets_desired ? '충족' : '미충족'} |`,
+    `| 컨펌 기한 | ${card.confirm_by} |`,
+    '',
+    diff > 0
+      ? `- 최종 추천안 대비 kg당 **+${won(diff)}원** 높은 조건입니다. 스케줄·안전성 이점이 필요할 때 대안으로 선택하세요.`
+      : '- 가격은 추천안 이하지만 offload 리스크/희망도착일 페널티로 추천 순위에서 밀린 조건입니다.',
+  ].join('\n')
+}
+
 // 타임라인 자동 스크롤
 watch(() => run.value?.events.length, () => {
   nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
@@ -199,7 +243,8 @@ const initials = (name) => name.trim()[0].toUpperCase()
       </section>
 
       <section class="panel pad">
-        <h3>항공사별 견적 · 네고 현황 <span v-if="run.candCount" class="sub">(운항 후보 {{ run.candCount }}편)</span></h3>
+        <h3>항공사별 견적 · 네고 현황
+          <span v-if="run.candCount" class="sub">(운항 후보 {{ run.candCount }}편<template v-if="shownRec"> · 항공사를 클릭하면 상세 확인</template>)</span></h3>
         <table>
           <thead>
             <tr><th>항공사 / 편</th><th>출발일</th><th>도착</th><th class="num">표준가</th><th class="num">첫 견적</th>
@@ -207,9 +252,13 @@ const initials = (name) => name.trim()[0].toUpperCase()
           </thead>
           <tbody>
             <tr v-for="p in run.picks" :key="p.carrier"
-                :class="{ winner: run.rec && run.rec.carrier === p.carrier }">
+                :class="{ winner: run.rec && run.rec.carrier === p.carrier,
+                          picked: shownRec && selectedCarrier === p.carrier,
+                          clickable: !!shownRec }"
+                @click="pickCarrier(p.carrier)">
               <td><b>{{ p.airline_name }}</b> <span class="mono sub">{{ p.flight_number }}</span>
-                  <span :class="['badge', p.flight_type === 'CARGO' ? 'blue' : 'gray']">{{ p.flight_type === 'CARGO' ? '화물기' : '여객기' }}</span></td>
+                  <span :class="['badge', p.flight_type === 'CARGO' ? 'blue' : 'gray']">{{ p.flight_type === 'CARGO' ? '화물기' : '여객기' }}</span>
+                  <span v-if="run.rec && run.rec.carrier === p.carrier" class="badge green">★ 추천</span></td>
               <td>{{ p.dep_date }}</td>
               <td>{{ p.arr_date }} <span class="sub">{{ p.arr_time }}</span></td>
               <td class="num">{{ won(run.carrierState[p.carrier]?.std) }}</td>
@@ -229,44 +278,57 @@ const initials = (name) => name.trim()[0].toUpperCase()
       </section>
     </div>
 
-    <!-- 추천 (이번 실행 or 저장된 결과) -->
-    <section v-if="shownRec" class="rec">
+    <!-- 항공사별 상세 카드 (추천 = 녹색 / 대안 = 주황) -->
+    <section v-if="shownCard" class="rec" :class="{ altcard: !shownCard.isWinner }">
+      <!-- 항공사 전환 칩 (저장된 추천에서도 대안 접근 가능) -->
+      <div class="carrier-chips" v-if="(shownRec.alternatives || []).length">
+        <a :class="{ on: selectedCarrier === shownRec.carrier, win: true }"
+           @click="pickCarrier(shownRec.carrier)">★ {{ shownRec.airline_name }}</a>
+        <a v-for="alt in shownRec.alternatives" :key="alt.carrier"
+           :class="{ on: selectedCarrier === alt.carrier }" @click="pickCarrier(alt.carrier)">
+          {{ alt.airline_name }} <span class="chip-rate">{{ won(alt.rate_per_kg) }}원</span>
+        </a>
+      </div>
+
       <div class="rec-head">
         <div>
-          <div class="rec-title">★ 추천: {{ shownRec.airline_name }} {{ shownRec.flight_number }}
+          <div class="rec-title" :class="{ alt: !shownCard.isWinner }">
+            {{ shownCard.isWinner ? '★ 추천' : '◇ 대안' }}: {{ shownCard.airline_name }} {{ shownCard.flight_number }}
             <span v-if="!run?.rec" class="badge gray">저장된 실행 결과</span>
           </div>
           <div class="rec-sub">
-            {{ shownRec.dep_date }} {{ shownRec.dep_time }} 출발 · {{ shownRec.arr_date }} {{ shownRec.arr_time || '' }} 도착
-            · 공장 ETA +{{ shownRec.factory_eta_hours }}h
+            {{ shownCard.dep_date }} {{ shownCard.dep_time }} 출발 · {{ shownCard.arr_date }} {{ shownCard.arr_time || '' }} 도착
+            · 공장 ETA +{{ shownCard.factory_eta_hours }}h
           </div>
         </div>
         <div class="rec-price">
-          <div class="rate">kg당 {{ won(shownRec.rate_per_kg) }}원</div>
-          <div class="total">총 {{ won(shownRec.total_krw) }}원</div>
+          <div class="rate">kg당 {{ won(shownCard.rate_per_kg) }}원</div>
+          <div class="total">총 {{ won(shownCard.total_krw) }}원</div>
         </div>
       </div>
       <div class="rec-badges">
-        <span class="badge green">표준가 대비 -{{ shownRec.saving_pct }}% ({{ won(shownRec.saving_krw) }}원 절감)</span>
-        <span v-if="shownRec.offload_safe" class="badge green">OFFLOAD-SAFE (차기편 {{ shownRec.next_flight_arr }} 도착)</span>
+        <span class="badge green">표준가 대비 -{{ shownCard.saving_pct }}% ({{ won(shownCard.saving_krw) }}원 절감)</span>
+        <span v-if="shownCard.offload_safe" class="badge green">OFFLOAD-SAFE (차기편 {{ shownCard.next_flight_arr }} 도착)</span>
         <span v-else class="badge amber">OFFLOAD RISK</span>
-        <span v-if="shownRec.meets_desired" class="badge blue">희망도착일 충족</span>
-        <span class="badge amber">컨펌 기한 {{ shownRec.confirm_by }}</span>
-        <span v-if="selected?.awb" class="badge awb">AWB {{ selected.awb }}</span>
+        <span v-if="shownCard.meets_desired" class="badge blue">희망도착일 충족</span>
+        <span class="badge amber">컨펌 기한 {{ shownCard.confirm_by }}</span>
+        <span v-if="selected?.awb && selected?.booked_carrier === shownCard.carrier" class="badge awb">
+          AWB {{ selected.awb }}</span>
       </div>
-      <div class="rationale" v-html="md(shownRec.rationale)"></div>
-      <div v-if="selected?.status === 'BOOKED'" class="confirm-row">
-        <button class="primary" disabled>예약 확정됨 ✔</button>
-      </div>
-      <div v-else class="confirm-row">
-        <button class="primary" :disabled="booking" @click="confirmBooking(shownRec)">
-          추천 — {{ shownRec.airline_name }}(으)로 확정
+      <div class="rationale" v-html="md(shownCard.isWinner ? shownCard.rationale : altRationale(shownCard))"></div>
+      <div class="confirm-row">
+        <template v-if="selected?.status === 'BOOKED'">
+          <button class="primary" disabled>
+            {{ selected?.booked_carrier === shownCard.carrier
+               ? `예약 확정됨 ✔ — ${shownCard.airline_name}` : '예약 확정됨 ✔' }}
+          </button>
+        </template>
+        <button v-else-if="shownCard.isWinner" class="primary" :disabled="booking"
+                @click="confirmBooking(shownCard)">
+          추천 — {{ shownCard.airline_name }}(으)로 확정
         </button>
-        <!-- 대안: 추천받지 못한 항공사로도 확정 가능 -->
-        <button v-for="alt in shownRec.alternatives || []" :key="alt.carrier" class="alt"
-                :disabled="booking" @click="confirmBooking(alt)"
-                :title="`${alt.flight_number} ${alt.dep_date} 출발 · 표준가 대비 -${alt.saving_pct}%`">
-          {{ alt.airline_name }}(으)로 확정 <span class="alt-rate">{{ won(alt.rate_per_kg) }}원/kg</span>
+        <button v-else class="alt" :disabled="booking" @click="confirmBooking(shownCard)">
+          {{ shownCard.airline_name }}(으)로 확정 <span class="alt-rate">{{ won(shownCard.rate_per_kg) }}원/kg</span>
         </button>
       </div>
 
@@ -344,6 +406,9 @@ button.booked {
 .log-line.error { color: #fca5a5; }
 .log-icon { display: inline-block; width: 22px; }
 tr.winner { background: var(--green-soft); }
+tr.clickable { cursor: pointer; }
+tr.picked { box-shadow: inset 3px 0 0 var(--blue); }
+tr.picked td:first-child { font-weight: 700; }
 .market { margin-top: 10px; font-size: 13px; color: var(--sub); }
 
 /* 실행 중 n/m 배지: 회신 수신마다 flash + 상시 pulse */
@@ -362,6 +427,20 @@ tr.winner { background: var(--green-soft); }
 }
 
 .rec { margin-top: 16px; border: 2px solid var(--green); border-radius: 10px; padding: 16px; background: var(--green-soft); }
+.rec.altcard { border-color: var(--amber); background: var(--amber-soft); }
+.rec-title.alt { color: var(--amber); }
+.rec.altcard .mails { border-top-color: var(--amber); }
+
+/* 항공사 전환 칩 (추천 ★ 녹색 / 대안 주황) */
+.carrier-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.carrier-chips a {
+  cursor: pointer; font-size: 12.5px; padding: 5px 12px; border-radius: 999px;
+  background: #fff; border: 1.5px solid var(--line); color: var(--sub); font-weight: 600;
+}
+.carrier-chips a.win { border-color: var(--green); color: var(--green); }
+.carrier-chips a.on { background: var(--amber); border-color: var(--amber); color: #fff; }
+.carrier-chips a.win.on { background: var(--green); border-color: var(--green); color: #fff; }
+.carrier-chips .chip-rate { font-weight: 400; font-size: 11.5px; opacity: 0.8; }
 .rec-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .rec-title { font-size: 16px; font-weight: 800; color: var(--green); }
 .rec-sub { font-size: 12.5px; color: var(--sub); margin-top: 4px; }

@@ -16,6 +16,7 @@ frontend/dist/
 .idea/
 .vscode/
 *.log
+docs/*
 
 # deploy
 deploy.sh

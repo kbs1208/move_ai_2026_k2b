@@ -13,7 +13,7 @@ from llm import chat, chat_json
 GLOVIS = {"name": "김글로 매니저", "email": "kim.glovis@glovis.com", "team": "현대글로비스 항공수입팀"}
 GLOVIS_SIGNATURE = "감사합니다.\n\n현대글로비스 항공수입팀\n매니저 김글로"
 MAX_RFQ_CARRIERS = 5
-NEGO_TOP_N = 2
+NEGO_TOP_N = 3
 OFFLOAD_RISK_PENALTY = 600  # kg당 페널티: offload 시 차기편이 데드라인 못 지키는 후보 (컨셉 핵심 규칙)
 DESIRED_MISS_PENALTY = 100  # 희망도착일 미충족 페널티
 MAIL_DELAY_SEC = 5          # 메일 발송 -> 회신 수신 사이 강제 딜레이 (왕복 현실감)

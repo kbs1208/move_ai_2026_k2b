@@ -62,9 +62,11 @@ def meta():
 
 @app.get("/api/orders")
 def orders():
-    # 저장된 추천(영속) + 확정 AWB 포함
+    # 저장된 추천(영속) + 확정 AWB/항공사 포함
     awbs = {b["order_no"]: b.get("awb") for b in store.bookings}
-    return [{**o, "recommendation": store.recommendations.get(no), "awb": awbs.get(no)}
+    carriers = {b["order_no"]: b.get("carrier") for b in store.bookings}
+    return [{**o, "recommendation": store.recommendations.get(no),
+             "awb": awbs.get(no), "booked_carrier": carriers.get(no)}
             for no, o in store.orders.items()]
 
 
