@@ -1,5 +1,6 @@
 # FastAPI 앱: REST + SSE (에이전트 실행 스트림)
 import json
+import random
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -7,9 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from agent import run_agent
+from agent import GLOVIS, _now, run_agent
 from domain import TODAY, GROUND_HOURS, find_candidates
-from store import store
+from store import AWB_PREFIX, store
 
 app = FastAPI(title="Air Cargo Nego Agent")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -23,8 +24,9 @@ def meta():
 
 @app.get("/api/orders")
 def orders():
-    # 저장된 추천(영속) 포함
-    return [{**o, "recommendation": store.recommendations.get(no)}
+    # 저장된 추천(영속) + 확정 AWB 포함
+    awbs = {b["order_no"]: b.get("awb") for b in store.bookings}
+    return [{**o, "recommendation": store.recommendations.get(no), "awb": awbs.get(no)}
             for no, o in store.orders.items()]
 
 
@@ -36,6 +38,11 @@ def rates():
 @app.get("/api/schedules")
 def schedules():
     return store.schedules
+
+
+@app.get("/api/contacts")
+def contacts():
+    return list(store.contacts.values())
 
 
 @app.get("/api/orders/{order_no}/candidates")
@@ -71,8 +78,27 @@ def book(rec: dict):
     order_no = rec.get("order_no")
     if order_no not in store.orders:
         raise HTTPException(404)
+    # AWB 채번: 항공사 prefix 3자리 + 시리얼 7자리 + 체크디짓 1자리 (mod 7) = 총 11자리
+    serial = random.randint(0, 9999999)
+    awb = f"{AWB_PREFIX.get(rec.get('carrier'), '000')}-{serial:07d}{serial % 7}"
+    rec["awb"] = awb
     store.add_booking(rec)  # DB 영속화 + 주문 상태 BOOKED
-    return {"ok": True, "order_no": order_no}
+    # AWB 회신 메일: 글로비스 -> 항공사 (네고 스레드에 이어서 저장)
+    thread = next((t for t in reversed(store.threads)
+                   if t.get("order_no") == order_no and t.get("carrier") == rec.get("carrier")), None)
+    if thread:
+        contact = store.contacts.get(rec["carrier"], {})
+        thread["messages"].append({
+            "from": GLOVIS["email"], "from_name": GLOVIS["name"],
+            "to": contact.get("email", ""), "ts": _now(), "direction": "out",
+            "body": (f"안녕하세요, {contact.get('name', '담당자')}님. {GLOVIS['team']} {GLOVIS['name']}입니다.\n"
+                     f"협의드린 조건(kg당 {rec.get('rate_per_kg', 0):,}원, {rec.get('flight_number', '')} "
+                     f"{rec.get('dep_date', '')} 출발)으로 예약을 확정합니다.\n"
+                     f"당사 시스템에 예약한 AWB 번호는 {awb} 입니다. 부킹 확정 처리 부탁드립니다.\n"
+                     f"감사합니다."),
+        })
+        store.save_thread(thread)
+    return {"ok": True, "order_no": order_no, "awb": awb}
 
 
 @app.delete("/api/bookings/{order_no}")

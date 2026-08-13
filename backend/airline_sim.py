@@ -58,6 +58,11 @@ def write_reply_email(contact, ctx, decision):
         "quote": f"견적 제시: kg당 {decision['rate']:,} KRW (all-in, 유류/보안할증 포함)",
         "accept": f"제안가 수락: kg당 {decision['rate']:,} KRW 확정",
         "counter": f"역제안: 제안가는 어렵고 kg당 {decision['rate']:,} KRW까지 가능",
+        "confirm_request": (
+            f"최종 합의 확인: kg당 {decision['rate']:,} KRW로 스페이스 홀드 완료. "
+            "메일의 마지막 문장은 반드시 다음 문구 그대로 끝낼 것: "
+            "'예약확정을 위해 당사시스템에 예약한 AWB 번호를 회신하여 주시기 바랍니다.'"
+        ),
     }[decision["decision"]]
     lf_note = "스페이스 여유 있음" if decision["lf"] < 0.65 else ("스페이스 보통" if decision["lf"] < 0.8 else "스페이스 타이트, 강하게 어필")
     system = (f"당신은 {contact['airline']} 화물 예약 담당자 {contact['name']}입니다. "
@@ -73,6 +78,10 @@ def write_reply_email(contact, ctx, decision):
         return chat(system, user, max_tokens=600)
     except Exception:
         # ponytail: 데모 보험용 최소 폴백
+        if decision["decision"] == "confirm_request":
+            return (f"안녕하세요, {contact['airline']} {contact['name']}입니다.\n"
+                    f"{ctx['flight_number']} ({ctx['dep_date']}) 건 kg당 {decision['rate']:,} KRW로 확정 진행합니다.\n"
+                    "예약확정을 위해 당사시스템에 예약한 AWB 번호를 회신하여 주시기 바랍니다.")
         return (f"안녕하세요, {contact['airline']} {contact['name']}입니다.\n"
                 f"{ctx['flight_number']} ({ctx['dep_date']}) 건, kg당 {decision['rate']:,} KRW (all-in) 안내드립니다.\n"
                 f"감사합니다.")

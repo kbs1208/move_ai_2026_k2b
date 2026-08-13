@@ -104,10 +104,24 @@ function start() {
   })
 }
 
+async function refreshThreads(no) {
+  // 서버에 저장된 최신 스레드로 갱신 (AWB 회신/클로징 메일 반영)
+  const all = await getJSON('/api/emails')
+  const mine = all.filter((t) => t.order_no === no)
+  const byCarrier = {}
+  for (const t of mine.reverse()) byCarrier[t.carrier] = t
+  if (runs[no]) {
+    for (const [c, t] of Object.entries(byCarrier)) if (runs[no].threads[c]) runs[no].threads[c] = t
+  } else {
+    savedThreads.value = Object.values(byCarrier)
+  }
+}
+
 async function confirmBooking() {
   booking.value = true
   await postJSON('/api/bookings', shownRec.value)
   await loadOrders(true)
+  await refreshThreads(selected.value.order_no)
   booking.value = false
 }
 
@@ -276,6 +290,7 @@ const initials = (name) => name.trim()[0].toUpperCase()
         <span v-else class="badge amber">OFFLOAD RISK</span>
         <span v-if="shownRec.meets_desired" class="badge blue">희망도착일 충족</span>
         <span class="badge amber">컨펌 기한 {{ shownRec.confirm_by }}</span>
+        <span v-if="selected?.awb" class="badge awb">AWB {{ selected.awb }}</span>
       </div>
       <p class="rationale">{{ shownRec.rationale }}</p>
       <button class="primary" :disabled="booking || selected?.status === 'BOOKED'" @click="confirmBooking">
@@ -359,6 +374,7 @@ tr.winner { background: var(--green-soft); }
   background: #ede9fe; color: #7c3aed; font-family: ui-monospace, monospace;
   animation: flash 0.7s ease, pulse 1.6s ease 0.7s infinite;
 }
+.badge.awb { background: #0f172a; color: #fff; font-family: ui-monospace, monospace; }
 @keyframes flash {
   0% { background: #7c3aed; color: #fff; transform: scale(1.25); }
   100% { background: #ede9fe; color: #7c3aed; transform: scale(1); }

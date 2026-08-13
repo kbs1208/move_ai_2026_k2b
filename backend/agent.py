@@ -300,7 +300,23 @@ def run_agent(store, order_no, today=TODAY):
         "market": market,
     }
     yield {"type": "progress", "message": "추천 근거 정리 중 (AI)..."}
-    rec["rationale"] = gen_rationale(order, rec, market, hist_ratio)
+    contact = store.contacts[winner]
+    closing_dec = {"decision": "confirm_request", "rate": rate,
+                   "lf": sims[winner]["dec"]["lf"]}
+    with ThreadPoolExecutor(2) as ex:  # 근거 + 추천사 클로징 메일 병렬 생성
+        fut_rationale = ex.submit(gen_rationale, order, rec, market, hist_ratio)
+        fut_closing = ex.submit(write_reply_email, contact,
+                                {"carrier": winner, "flight_number": pick["flight_number"],
+                                 "origin": order["origin"], "dest": order["dest"],
+                                 "dep_date": pick["dep_date"], "cw": cw}, closing_dec)
+        rec["rationale"] = fut_rationale.result()
+        closing_body = fut_closing.result()
+    # 최종 추천 항공사의 마무리 메일: AWB 번호 회신 요청
+    threads[winner]["messages"].append({"from": contact["email"], "from_name": contact["name"],
+                                        "to": GLOVIS["email"], "ts": _now(),
+                                        "direction": "in", "body": closing_body})
+    yield {"type": "email", "thread": threads[winner], "stage": "nego", "direction": "in",
+           "message": f"← {contact['airline']} 합의 확정 안내 (AWB 번호 회신 요청)"}
     store.last_recommendation = rec
     yield {"type": "recommendation", "recommendation": rec,
            "message": f"추천: {pick['airline_name']} {pick['flight_number']} / {pick['dep_date']} / "

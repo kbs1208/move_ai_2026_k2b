@@ -5,6 +5,7 @@ import MailView from './views/MailView.vue'
 import DashboardView from './views/DashboardView.vue'
 import RatesView from './views/RatesView.vue'
 import SchedulesView from './views/SchedulesView.vue'
+import ContactsView from './views/ContactsView.vue'
 
 const tab = ref('orders')
 const menus = [
@@ -12,6 +13,7 @@ const menus = [
   { id: 'mail', label: '메일함', icon: '✉' },
   { id: 'rates', label: '가격 테이블', icon: '₩' },
   { id: 'sched', label: '스케줄 테이블', icon: '⏱' },
+  { id: 'contacts', label: '항공사 담당자', icon: '☎' },
   { id: 'dash', label: '운영 대시보드', icon: '▦' },
 ]
 </script>
@@ -37,6 +39,7 @@ const menus = [
     <MailView v-else-if="tab === 'mail'" />
     <RatesView v-else-if="tab === 'rates'" />
     <SchedulesView v-else-if="tab === 'sched'" />
+    <ContactsView v-else-if="tab === 'contacts'" />
     <DashboardView v-else />
   </main>
 </template>

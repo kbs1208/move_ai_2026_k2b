@@ -14,6 +14,9 @@ HISTORY_PATH = Path(__file__).parent / "history_emails.json"
 # 요율표 코드 -> 스케줄/이메일 코드 통일 (ZET==KJ 에어제타, CV==C8 카고룩스)
 CARRIER_ALIAS = {"ZET": "KJ", "CV": "C8"}
 
+# 항공사별 AWB prefix 3자리 (IATA 코드 관례 + 가상 항공사는 임의 배정)
+AWB_PREFIX = {"KE": "180", "DL": "006", "AA": "001", "5Y": "369", "KJ": "988", "MH": "232", "C8": "172"}
+
 CSV_TABLES = {
     "order_lines": DATA_DIR / "KD 주문정보" / "KD_Orders.csv",
     "freight_rates": DATA_DIR / "항공사 가격표" / "Freight_Rates_KRW.csv",
@@ -127,7 +130,8 @@ def parse_schedules(rows):
 
 def parse_contacts(rows):
     return {r["항공사 코드"]: {"code": r["항공사 코드"], "airline": r["항공사명"],
-                            "name": r["담당자 명"], "email": r["이메일"]} for r in rows}
+                            "name": r["담당자 명"], "email": r["이메일"],
+                            "awb_prefix": AWB_PREFIX.get(r["항공사 코드"], "000")} for r in rows}
 
 
 class Store:
